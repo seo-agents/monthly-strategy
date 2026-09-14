@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Monthly SEO Strategy Agent</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; color: #1a1a1a; }
+    h1 { color: #2c3e50; }
+    h2 { color: #34495e; border-bottom: 2px solid #eee; padding-bottom: 8px; margin-top: 40px; }
+    label { display: block; font-weight: bold; margin-top: 16px; }
+    input, select, textarea { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-family: inherit; }
+    textarea { min-height: 60px; }
+    .required { color: red; }
+    button { margin-top: 20px; padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { opacity: 0.9; }
+    .task { margin-bottom: 15px; padding: 12px; background: #f9f9f9; border-radius: 6px; border-left: 4px solid #4CAF50; }
+    .task.all-tasks { border-left-color: #999; background: #fff; border: 1px solid #eee; }
+    .tag { display: inline-block; background: #e0e0e0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-top: 6px; margin-right: 6px; }
+    .section-divider { margin-top: 50px; padding-top: 20px; border-top: 3px solid #333; }
+    #loading-box { display: none; text-align: center; padding: 40px; color: #666; }
+    #review-box { display: none; }
+    #result-box { display: none; margin-top: 20px; background: #eef4f0; padding: 20px; border-radius: 6px; }
+    #result-box a { font-weight: bold; color: #2E6B4F; }
+    #statusMsg { margin-top: 16px; padding: 12px; border-radius: 4px; display: none; }
+    #statusMsg.error { background: #f8d7da; color: #721c24; display: block; }
+  </style>
+</head>
+<body>
+
+  <h1>Monthly SEO Strategy Agent</h1>
+
+  <!-- STEP 1: FORM A -->
+  <div id="form-box">
+    <form id="formA">
+      <label>Client Domain <span class="required">*</span></label>
+      <input type="text" name="domain" required placeholder="e.g. leewarehouse.co.nz">
+
+      <label>Tracker Link <span class="required">*</span></label>
+      <input type="url" name="tracker_url" required>
+
+      <label>Bulk Fix Progress Link <span class="required">*</span></label>
+      <input type="url" name="bulk_fix_progress_url" required>
+
+      <label>Blog Topic Bank Link</label>
+      <input type="url" name="blog_bank_url">
+
+      <label>Upload New Tech Audit (.xlsx)</label>
+      <input type="file" name="tech_audit_file" accept=".xlsx">
+
+      <label>Current Month</label>
+      <select name="month">
+        <option value="">-- Select --</option>
+        <option value="Month 1">Month 1</option>
+        <option value="Month 2">Month 2</option>
+        <option value="Month 3+">Month 3+</option>
+      </select>
+
+      <label>Manual Overrides</label>
+      <textarea name="overrides" placeholder="e.g. Focus on new LinkedIn page"></textarea>
+
+      <button type="submit">Generate Strategy</button>
+    </form>
+  </div>
+
+  <!-- LOADING -->
+  <div id="loading-box">
+    <p id="loading-text">Generating strategy... this takes about 1 minute.</p>
+  </div>
+
+  <!-- STEP 2: REVIEW -->
+  <div id="review-box">
+    <form id="reviewForm">
+      <div id="strategySection">
+        <h2>Strategy Plan (Client-Facing Summary)</h2>
+      </div>
+
+      <div class="section-divider" id="allTasksSection">
+        <h2>All Tasks (Full List — Sent to Monday.com)</h2>
+      </div>
+
+      <button type="submit">Approve & Submit</button>
+    </form>
+  </div>
+
+  <!-- RESULT -->
+  <div id="result-box"></div>
+
+  <div id="statusMsg"></div>
+
+  <script>
+    const N8N_GENERATE_URL = 'https://n8n-fmid.srv1801788.hstgr.cloud/webhook/monthly-strategy-start';
+    const N8N_SUBMIT_REVIEW_URL = 'https://n8n-fmid.srv1801788.hstgr.cloud/webhook/submit-review';
+
+    let currentStrategyData = null;
+
+    function show(id) {
+      ['form-box', 'loading-box', 'review-box', 'result-box'].forEach(boxId => {
+        document.getElementById(boxId).style.display = (boxId === id) ? 'block' : 'none';
+      });
+    }
+
+    function clearStatus() {
+      const statusMsg = document.getElementById('statusMsg');
+      statusMsg.className = '';
+      statusMsg.style.display = 'none';
+      statusMsg.textContent = '';
+    }
+
+    function showError(msg) {
+      const statusMsg = document.getElementById('statusMsg');
+      statusMsg.className = 'error';
+      statusMsg.style.display = 'block';
+      statusMsg.textContent = 'Error: ' + msg;
+    }
+
+    document.getElementById('formA').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      clearStatus();
+      document.getElementById('loading-text').textContent = 'Generating strategy... this takes about 1 minute.';
+      show('loading-box');
+
+      const formData = new FormData(this);
+
+      try {
+        const res = await fetch(N8N_GENERATE_URL, { method: 'POST', body: formData });
+        const raw = await res.text();
+
+        if (!res.ok) {
+          throw new Error('Server returned status ' + res.status + '. ' + raw);
+        }
+
+        let data;
+        try { data = JSON.parse(raw); } catch (err) {
+          throw new Error('Invalid response from server.');
+        }
+        const item = Array.isArray(data) ? (data[0].json || data[0]) : data;
+
+        if (!item || !item.strategy_document) {
+          throw new Error('Response did not contain strategy data.');
+        }
+
+        currentStrategyData = item;
+        renderReview(item);
+        show('review-box');
+      } catch (err) {
+        showError(err.message);
+        show('form-box');
+      }
+    });
+
+    function renderReview(data) {
+      const doc = data.strategy_document;
+      const strategySection = document.getElementById('strategySection');
+      strategySection.innerHTML = '<h2>Strategy Plan (Client-Facing Summary)</h2>';
+
+      let combinedText = `EXECUTIVE SUMMARY\n${doc.executive_summary}\n\n`;
+combinedText += `PERFORMANCE SNAPSHOT\n${doc.performance_snapshot}\n\n`;
+
+combinedText += `LANDING PAGE OPTIMIZATION\n`;
+(doc.landing_page_optimization || []).forEach(t => {
+  combinedText += `${t.title}\n${t.brief}\n\n`;
+});
+
+combinedText += `BLOG CONTENT\n`;
+combinedText += `${doc.blog_content.title}\n${doc.blog_content.brief}\n\n`;
+
+combinedText += `BRAND MENTION\n${doc.brand_mention.brief}\n\n`;
+combinedText += `LINK-BUILDING CAMPAIGN\n${doc.link_building_campaign.brief}\n\n`;
+combinedText += `OPTIMISING VISUAL ASSETS\n${doc.optimising_visual_assets.brief}\n\n`;
+combinedText += `GSC ERRORS CHECK\n${doc.gsc_errors_check.brief}\n\n`;
+combinedText += `TITLES, META DESCRIPTION AND HEADING OPTIMISATION\n${doc.titles_meta_heading_optimisation.brief}\n\n`;
+
+      
+
+      strategySection.innerHTML += `
+        <div class="task">
+          <textarea name="full_strategy_text" style="min-height: 500px; font-family: monospace; font-size: 13px; line-height: 1.6;">${combinedText.trim()}</textarea>
+        </div>
+      `;
+
+            const mt = data.monday_tasks;
+      const allTasksSection = document.getElementById('allTasksSection');
+      allTasksSection.innerHTML = '<h2>All Tasks (Full List — Sent to Monday.com)</h2>';
+
+      const allItems = [
+        ...(mt.technical_tasks || []),
+        ...(mt.recurring_service_tasks || []),
+        ...(mt.standing_tasks || [])
+      ];
+
+      let tableHtml = `
+        <table style="width:100%; border-collapse: collapse; margin-top: 10px;">
+          <thead>
+            <tr style="background:#34495e; color:white;">
+              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Title</th>
+              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Description</th>
+              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Priority</th>
+              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Responsibility</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      allItems.forEach((t, i) => {
+        const rowBg = i % 2 === 0 ? '#f9f9f9' : '#ffffff';
+        tableHtml += `
+          <tr style="background:${rowBg};">
+            <td style="padding:10px; border:1px solid #ddd; font-weight:bold;">${t.title}</td>
+            <td style="padding:10px; border:1px solid #ddd;">${t.brief}</td>
+            <td style="padding:10px; border:1px solid #ddd;">${t.priority || '-'}</td>
+            <td style="padding:10px; border:1px solid #ddd;">${t.responsibility_of || '-'}</td>
+          </tr>
+        `;
+      });
+
+      tableHtml += `
+          </tbody>
+        </table>
+      `;
+
+      allTasksSection.innerHTML += tableHtml;
+    }
+    
+
+    document.getElementById('reviewForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      clearStatus();
+      document.getElementById('loading-text').textContent = 'Saving to Google Docs and creating Monday.com tasks...';
+      show('loading-box');
+
+      const formData = new FormData(this);
+      const editedFields = {
+        full_strategy_text: formData.get('full_strategy_text')
+      };
+
+      try {
+        const res = await fetch(N8N_SUBMIT_REVIEW_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            original_data: currentStrategyData,
+            edited_fields: editedFields
+          })
+        });
+        const raw = await res.text();
+
+        if (!res.ok) {
+          throw new Error('Server returned status ' + res.status + '. ' + raw);
+        }
+
+        let data;
+        try { data = JSON.parse(raw); } catch (err) {
+          throw new Error('Invalid response from server.');
+        }
+        const item = Array.isArray(data) ? (data[0].json || data[0]) : data;
+
+        const resultBox = document.getElementById('result-box');
+        resultBox.innerHTML = `
+          <p>Strategy approved and saved successfully.</p>
+          ${item.doc_url ? `<p><a href="${item.doc_url}" target="_blank">Open Strategy Google Doc</a></p>` : ''}
+        `;
+        show('result-box');
+      } catch (err) {
+        showError(err.message);
+        show('review-box');
+      }
+    });
+  </script>
+</body>
+</html>
