@@ -13,8 +13,6 @@
     button { margin-top: 20px; padding: 12px 24px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
     button:hover { opacity: 0.9; }
     .task { margin-bottom: 15px; padding: 12px; background: #f9f9f9; border-radius: 6px; border-left: 4px solid #4CAF50; }
-    .task.all-tasks { border-left-color: #999; background: #fff; border: 1px solid #eee; }
-    .tag { display: inline-block; background: #e0e0e0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-top: 6px; margin-right: 6px; }
     .section-divider { margin-top: 50px; padding-top: 20px; border-top: 3px solid #333; }
     #loading-box { display: none; text-align: center; padding: 40px; color: #666; }
     #review-box { display: none; }
@@ -22,6 +20,11 @@
     #result-box a { font-weight: bold; color: #2E6B4F; }
     #statusMsg { margin-top: 16px; padding: 12px; border-radius: 4px; display: none; }
     #statusMsg.error { background: #f8d7da; color: #721c24; display: block; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }
+    th { background: #34495e; color: white; }
+    .checkbox-label { display: flex; align-items: center; gap: 8px; font-weight: bold; margin-top: 16px; }
+    .checkbox-label input { width: auto; margin: 0; }
   </style>
 </head>
 <body>
@@ -37,22 +40,28 @@
       <label>Tracker Link <span class="required">*</span></label>
       <input type="url" name="tracker_url" required>
 
-      <label>Bulk Fix Progress Link <span class="required">*</span></label>
-      <input type="url" name="bulk_fix_progress_url" required>
-
       <label>Blog Topic Bank Link</label>
       <input type="url" name="blog_bank_url">
 
-      <label>Upload New Tech Audit (.xlsx)</label>
-      <input type="file" name="tech_audit_file" accept=".xlsx">
+      <!-- <label>Upload Blog Topic Bank (.xlsx) — optional</label>
+      <input type="file" name="blog_bank_file" accept=".xlsx"> -->
 
       <label>Current Month</label>
-      <select name="month">
+      <select name="month" id="monthSelect">
         <option value="">-- Select --</option>
         <option value="Month 1">Month 1</option>
         <option value="Month 2">Month 2</option>
         <option value="Month 3+">Month 3+</option>
       </select>
+
+      <div id="techAuditFieldWrapper">
+        <label>Upload New Tech Audit (.xlsx) — optional</label>
+        <input type="file" name="tech_audit_file" accept=".xlsx">
+      </div>
+      <label class="checkbox-label">
+  <input type="checkbox" name="is_ecommerce" value="true">
+  This client is an e-commerce website
+</label>
 
       <label>Manual Overrides</label>
       <textarea name="overrides" placeholder="e.g. Focus on new LinkedIn page"></textarea>
@@ -112,13 +121,32 @@
       statusMsg.textContent = 'Error: ' + msg;
     }
 
+    document.getElementById('monthSelect').addEventListener('change', function() {
+      const techAuditField = document.getElementById('techAuditFieldWrapper');
+      const techAuditInput = document.querySelector('input[name="tech_audit_file"]');
+
+      if (this.value === 'Month 1') {
+        techAuditField.style.display = 'none';
+        techAuditInput.value = '';
+      } else {
+        techAuditField.style.display = 'block';
+      }
+    });
+
     document.getElementById('formA').addEventListener('submit', async function(e) {
       e.preventDefault();
       clearStatus();
+
+      const techAuditInput = document.querySelector('input[name="tech_audit_file"]');
+
       document.getElementById('loading-text').textContent = 'Generating strategy... this takes about 1 minute.';
       show('loading-box');
 
       const formData = new FormData(this);
+
+      if (!techAuditInput.files || techAuditInput.files.length === 0) {
+        formData.delete('tech_audit_file');
+      }
 
       try {
         const res = await fetch(N8N_GENERATE_URL, { method: 'POST', body: formData });
@@ -134,7 +162,7 @@
         }
         const item = Array.isArray(data) ? (data[0].json || data[0]) : data;
 
-        if (!item || !item.strategy_document) {
+        if (!item) {
           throw new Error('Response did not contain strategy data.');
         }
 
@@ -148,28 +176,43 @@
     });
 
     function renderReview(data) {
-      const doc = data.strategy_document;
+      const doc = data.strategy_document || {};
       const strategySection = document.getElementById('strategySection');
       strategySection.innerHTML = '<h2>Strategy Plan (Client-Facing Summary)</h2>';
 
-      let combinedText = `EXECUTIVE SUMMARY\n${doc.executive_summary}\n\n`;
-combinedText += `PERFORMANCE SNAPSHOT\n${doc.performance_snapshot}\n\n`;
+      let combinedText = '';
 
-combinedText += `LANDING PAGE OPTIMIZATION\n`;
-(doc.landing_page_optimization || []).forEach(t => {
-  combinedText += `${t.title}\n${t.brief}\n\n`;
-});
+      if (data.fixed_task_list) {
+        combinedText += `CLIENT PHASE: ${data.client_phase}\n\n`;
+        data.fixed_task_list.forEach(t => {
+          combinedText += `${t.title}\n`;
+          if (t.brief) combinedText += `${t.brief}\n`;
+          combinedText += `\n`;
+        });
+      } else {
+        combinedText += `EXECUTIVE SUMMARY\n${doc.executive_summary}\n\n`;
+        combinedText += `PERFORMANCE SNAPSHOT\n${doc.performance_snapshot}\n\n`;
 
-combinedText += `BLOG CONTENT\n`;
-combinedText += `${doc.blog_content.title}\n${doc.blog_content.brief}\n\n`;
+        (doc.lpo_tasks || []).forEach(t => {
+          combinedText += `${t.title.toUpperCase()}\n${t.brief}\n\n`;
+        });
 
-combinedText += `BRAND MENTION\n${doc.brand_mention.brief}\n\n`;
-combinedText += `LINK-BUILDING CAMPAIGN\n${doc.link_building_campaign.brief}\n\n`;
-combinedText += `OPTIMISING VISUAL ASSETS\n${doc.optimising_visual_assets.brief}\n\n`;
-combinedText += `GSC ERRORS CHECK\n${doc.gsc_errors_check.brief}\n\n`;
-combinedText += `TITLES, META DESCRIPTION AND HEADING OPTIMISATION\n${doc.titles_meta_heading_optimisation.brief}\n\n`;
+        (doc.outreach_task || []).forEach(t => {
+          combinedText += `OUTREACH\n${t.title}\n${t.brief}\n\n`;
+        });
 
-      
+        (doc.blog_task || []).forEach(t => {
+          combinedText += `BLOG CONTENT\n${t.title}\n${t.brief}\n\n`;
+        });
+
+        (doc.standing_tasks || []).forEach(t => {
+          combinedText += `${t.title.toUpperCase()}\n${t.brief}\n\n`;
+        });
+
+        (doc.rotating_addons || []).forEach(t => {
+          combinedText += `${t.title.toUpperCase()}\n${t.brief}\n\n`;
+        });
+      }
 
       strategySection.innerHTML += `
         <div class="task">
@@ -177,49 +220,51 @@ combinedText += `TITLES, META DESCRIPTION AND HEADING OPTIMISATION\n${doc.titles
         </div>
       `;
 
-            const mt = data.monday_tasks;
+      const mt = data.monday_tasks || {};
       const allTasksSection = document.getElementById('allTasksSection');
       allTasksSection.innerHTML = '<h2>All Tasks (Full List — Sent to Monday.com)</h2>';
 
       const allItems = [
+        ...(mt.lpo_tasks || []),
+        ...(mt.outreach_task || []),
+        ...(mt.blog_task || []),
         ...(mt.technical_tasks || []),
         ...(mt.recurring_service_tasks || []),
-        ...(mt.standing_tasks || [])
+        ...(mt.standing_tasks || []),
+        ...(mt.rotating_addons || [])
       ];
 
-      let tableHtml = `
-        <table style="width:100%; border-collapse: collapse; margin-top: 10px;">
-          <thead>
-            <tr style="background:#34495e; color:white;">
-              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Title</th>
-              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Description</th>
-              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Priority</th>
-              <th style="padding:10px; text-align:left; border:1px solid #ddd;">Responsibility</th>
-            </tr>
-          </thead>
-          <tbody>
-      `;
-
-      allItems.forEach((t, i) => {
-        const rowBg = i % 2 === 0 ? '#f9f9f9' : '#ffffff';
-        tableHtml += `
-          <tr style="background:${rowBg};">
-            <td style="padding:10px; border:1px solid #ddd; font-weight:bold;">${t.title}</td>
-            <td style="padding:10px; border:1px solid #ddd;">${t.brief}</td>
-            <td style="padding:10px; border:1px solid #ddd;">${t.priority || '-'}</td>
-            <td style="padding:10px; border:1px solid #ddd;">${t.responsibility_of || '-'}</td>
-          </tr>
+      if (allItems.length > 0) {
+        let tableHtml = `
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Description</th>
+                <th>Priority</th>
+                <th>Responsibility</th>
+              </tr>
+            </thead>
+            <tbody>
         `;
-      });
 
-      tableHtml += `
-          </tbody>
-        </table>
-      `;
+        allItems.forEach(t => {
+          tableHtml += `
+            <tr>
+              <td><strong>${t.title}</strong></td>
+              <td>${t.brief}</td>
+              <td>${t.priority || '-'}</td>
+              <td>${t.responsibility_of || '-'}</td>
+            </tr>
+          `;
+        });
 
-      allTasksSection.innerHTML += tableHtml;
+        tableHtml += `</tbody></table>`;
+        allTasksSection.innerHTML += tableHtml;
+      } else {
+        allTasksSection.innerHTML += '<p><em>No additional tasks (fixed task list used).</em></p>';
+      }
     }
-    
 
     document.getElementById('reviewForm').addEventListener('submit', async function(e) {
       e.preventDefault();
